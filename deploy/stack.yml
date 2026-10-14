@@ -1,0 +1,36 @@
+# Production stack — `creative-bot` in Portainer, deployed from Git (Repository mode,
+# compose path `deploy/stack.yml`, automatic updates by polling).
+#
+# BOT_IMAGE comes from deploy/.env, which CI rewrites with the image digest on every
+# build (.github/workflows/image.yml). Everything else is a Portainer stack env var and
+# never goes in the repo:
+#
+#   GEMINI_API_KEY     TELEGRAM_TOKEN
+#   ALLOWED_USER_IDS   e.g. 1617582548,222222222
+#   CHAT_BRANDS        e.g. -5321330039:golden,-100xxxxxxxxxx:cassis
+#
+# Outbound traffic only (Telegram long polling + Gemini API): no ports, networks or Caddy.
+# State is plain files in the `creative_bot_data` volume; there is no database.
+
+name: creative-bot
+
+volumes:
+  creative_bot_data:
+
+services:
+  bot:
+    image: ${BOT_IMAGE}
+    container_name: creative-bot
+    restart: unless-stopped
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS}
+      CHAT_BRANDS: ${CHAT_BRANDS}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gemini-nano-banana-2.1}
+      TEXT_MODEL: ${TEXT_MODEL:-gemini-3.8-flash}
+      DRAFT_SIZE: ${DRAFT_SIZE:-2K}
+    volumes:
+      - creative_bot_data:/data
+    # The upscaler takes a few CPU-minutes per final image; cap it so it can't starve the VM.
+    cpus: ${CPU_LIMIT:-4}

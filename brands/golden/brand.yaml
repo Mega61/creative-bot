@@ -1,0 +1,69 @@
+# Golden Beauty Studio — brand kit for the creative bot.
+# Source of truth: golden-beauty-studio-landing (globals.css, layout.tsx fonts, public/logos).
+
+id: golden
+name: Golden Beauty Studio
+language: es # language for any on-image text and for bot replies
+
+about: >
+  Specialist nail studio in Sabaneta (Medellín, Colombia). Sculpted nails: acrylic,
+  polygel, builder gel, dipping, rubber, semi-permanent and press-on. Premium
+  materials, open sterilisation. Tagline: "El arte de las uñas, hecho a mano."
+
+audience: >
+  Women in Medellín / Sabaneta who see their nails as part of their look and want a
+  premium, careful, hand-made result.
+
+visual_style:
+  - High-end beauty campaign photography, soft and luminous
+  - Warm ivory and cream backgrounds, white-and-gold marble, polished gold accents
+  - Close, crisp macro detail on nails and products; skin looks real, not plastic
+  - Elegant and feminine, never loud or cluttered
+
+palette:
+  ivory: "#f8f4ee"
+  cream: "#f3ecdf"
+  paper: "#fbf8f3"
+  carbon: "#1c1714"
+  ink: "#2a221c"
+  gold-deep: "#5b2b08"
+  gold-dark: "#8b6a1f"
+  gold: "#ac8231"
+  gold-bright: "#e7aa51"
+  gold-soft: "#ffd49f"
+
+typography:
+  display: Cormorant Garamond (elegant high-contrast serif)
+  script: Italianno (thin handwritten script)
+  body: Inter (clean sans)
+
+always:
+  - Any on-image text is in Spanish, short (5 words or fewer) and spelled exactly as given
+  - Nails look realistic and well-finished, with clean cuticles and even shapes
+  - Gold reads as rich polished metallic gold, not yellow or orange
+
+never:
+  - Other brands' logos or product names (e.g. "Organic Nails", "NAIL COLOR GEL")
+  - Watermarks, Instagram/TikTok UI, emojis, stickers or icons
+  - Extra fingers, fused nails or deformed hands
+  - Feeding a generated image back in as a reference for a new round
+
+logos:
+  primary:
+    file: logos/full-logo.png
+    light: logos/full-logo-light.png # for dark backgrounds (corner stamp)
+    description: >
+      The word "Golden" in a flowing gold metallic handwritten script, and beneath it
+      "BEAUTY STUDIO" in small clean serif capitals with one thin horizontal line on
+      each side. The gold has a soft polished metallic gradient.
+  badge:
+    file: logos/round-badge.png
+    description: >
+      Round badge: white-and-gold marble disc with the gold "Golden" script logo and
+      "BEAUTY STUDIO" centred on it.
+
+corner_stamp:
+  logo: primary
+  position: bottom-right # bottom-right | bottom-left | top-right | top-left | bottom-center
+  width_pct: 22 # logo width as % of image width
+  margin_pct: 4

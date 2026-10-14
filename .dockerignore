@@ -1,0 +1,6 @@
+.venv
+data
+models
+.env
+.git
+tests

@@ -1,0 +1,62 @@
+# Cassis Originals — brand kit for the creative bot.
+# Source of truth: cassis-originals/DESIGN.md + PRODUCT.md, cassis-originals-assets/cassis-originals-logo.
+
+id: cassis
+name: Cassis Originals
+language: es
+
+about: >
+  Ecommerce selling genuine imported '47 caps into Colombia, mainly the '47 Clean Up:
+  the unstructured, low-profile, relaxed-crown cap. The cap is sold as the finishing
+  piece of an outfit, classy and "old money", not as sports merchandise.
+
+audience: >
+  Fashion-first buyers in Colombia who care how a cap completes an outfit more than
+  which team or brand is on it.
+
+visual_style:
+  - Editorial fashion photography with an "old money" feel, quiet and confident
+  - Warm paper and stone tones, deep navy, bronze and oxblood accents
+  - The relaxed, unstructured Clean Up silhouette is always clearly readable
+  - Real fabric texture, stitching and embroidery stay accurate to the product photo
+
+palette:
+  stock: "#F4EFE4"
+  stock-deep: "#EBE3D2"
+  ink: "#1A2420"
+  navy: "#14294D"
+  bronze: "#6B4F2A"
+  oxblood: "#7B2D26"
+  brand-brown: "#392517"
+
+typography:
+  display: Libre Bodoni (classic high-contrast serif)
+  body: Archivo (clean grotesque sans)
+  script: Pinyon Script (formal script, for accents only)
+
+always:
+  - The cap keeps its exact shape, colour, embroidery and logo from the product photo
+  - Any on-image text is in Spanish, short (5 words or fewer) and spelled exactly as given
+
+never:
+  - Making the cap look structured, stiff or like a flat-brim snapback
+  - Changing or inventing the embroidery or team logos on the cap
+  - Sports-merch styling (stadiums, jerseys, team colours as the theme) unless asked
+  - Discount or price-led visuals unless asked
+  - Watermarks, Instagram/TikTok UI, emojis, stickers or icons
+  - Feeding a generated image back in as a reference for a new round
+
+logos:
+  primary:
+    file: logos/mark.png
+    light: logos/mark-light.png
+    description: >
+      Single-colour dark brown (#392517) monogram: a bold letter "C" topped by a Roman
+      helmet crest with three V-notches, and a smaller second "C" below it. Flat, no
+      gradients, no text.
+
+corner_stamp:
+  logo: primary
+  position: bottom-right
+  width_pct: 9
+  margin_pct: 4

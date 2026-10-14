@@ -1,0 +1,22 @@
+# Local run: builds the image and reads .env. Production uses deploy/stack.yml.
+services:
+  creative-bot:
+    container_name: creative-bot
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS}
+      CHAT_BRANDS: ${CHAT_BRANDS}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gemini-nano-banana-2.1}
+      TEXT_MODEL: ${TEXT_MODEL:-gemini-3.8-flash}
+      DRAFT_SIZE: ${DRAFT_SIZE:-2K}
+    volumes:
+      - creative-bot-data:/data
+    # The upscaler is CPU-heavy for ~1-2 min per final image; cap it so it can't starve the box.
+    cpus: ${CPU_LIMIT:-4}
+
+volumes:
+  creative-bot-data:

@@ -1,0 +1,93 @@
+# Builds the bot image, publishes it to GHCR and writes its digest to deploy/.env.
+# Portainer polls the repo and redeploys. CI has no credentials to the VM.
+#
+# Loop guards: the deploy commit only touches deploy/.env (not in `paths`) and says [skip ci].
+
+name: image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "brands/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Dockerfile"
+      - ".github/workflows/image.yml"
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: write
+
+concurrency:
+  group: image
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/mega61/creative-bot
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # The gate: no green tests, no image. (Without the upscale extra: tests use Lanczos.)
+      - name: Tests
+        run: uv run --frozen pytest -q
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Short SHA
+        id: vars
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:sha-${{ steps.vars.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Write digest to deploy/.env
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHORT: ${{ steps.vars.outputs.short }}
+        run: |
+          set -euo pipefail
+          test -n "$DIGEST"
+          sed -i -E "s#^BOT_IMAGE=.*#BOT_IMAGE=${IMAGE}@${DIGEST}#" deploy/.env
+          grep -q "^BOT_IMAGE=${IMAGE}@sha256:" deploy/.env
+          if git diff --quiet -- deploy/.env; then
+            echo "Digest unchanged; nothing to deploy."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/.env
+          git commit -m "[skip ci] deploy: bot ${SHORT}"
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### creative-bot" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${IMAGE}:sha-${{ steps.vars.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Digest: \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
