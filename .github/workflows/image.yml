@@ -1,7 +1,7 @@
-# Builds the bot image, publishes it to GHCR and writes its digest to deploy/.env.
+# Builds the bot image, publishes it to GHCR and writes its digest into deploy/stack.yml.
 # Portainer polls the repo and redeploys. CI has no credentials to the VM.
 #
-# Loop guards: the deploy commit only touches deploy/.env (not in `paths`) and says [skip ci].
+# Loop guards: the deploy commit only touches deploy/stack.yml (not in `paths`) and says [skip ci].
 
 name: image
 
@@ -65,22 +65,22 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Write digest to deploy/.env
+      - name: Write digest to deploy/stack.yml
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           SHORT: ${{ steps.vars.outputs.short }}
         run: |
           set -euo pipefail
           test -n "$DIGEST"
-          sed -i -E "s#^BOT_IMAGE=.*#BOT_IMAGE=${IMAGE}@${DIGEST}#" deploy/.env
-          grep -q "^BOT_IMAGE=${IMAGE}@sha256:" deploy/.env
-          if git diff --quiet -- deploy/.env; then
+          sed -i -E "s#^    image: ghcr\.io/mega61/creative-bot.*#    image: ${IMAGE}@${DIGEST}#" deploy/stack.yml
+          grep -q "^    image: ${IMAGE}@${DIGEST}$" deploy/stack.yml
+          if git diff --quiet -- deploy/stack.yml; then
             echo "Digest unchanged; nothing to deploy."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add deploy/.env
+          git add deploy/stack.yml
           git commit -m "[skip ci] deploy: bot ${SHORT}"
           git pull --rebase --autostash origin main
           git push origin HEAD:main

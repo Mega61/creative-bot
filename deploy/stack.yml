@@ -1,9 +1,9 @@
 # Production stack — `creative-bot` in Portainer, deployed from Git (Repository mode,
 # compose path `deploy/stack.yml`, automatic updates by polling).
 #
-# BOT_IMAGE comes from deploy/.env, which CI rewrites with the image digest on every
-# build (.github/workflows/image.yml). Everything else is a Portainer stack env var and
-# never goes in the repo:
+# The `image:` line below is rewritten by CI with the digest of every build
+# (.github/workflows/image.yml); `git revert` of a deploy commit rolls back exactly.
+# Everything else is a Portainer stack env var and never goes in the repo:
 #
 #   GEMINI_API_KEY     TELEGRAM_TOKEN
 #   ALLOWED_USER_IDS   e.g. 111111111,222222222
@@ -19,7 +19,7 @@ volumes:
 
 services:
   bot:
-    image: ${BOT_IMAGE}
+    image: ghcr.io/mega61/creative-bot@sha256:3630c4b81471acf944e455194ecb274647a73b430c25aa6d72c7257f5a741359
     container_name: creative-bot
     restart: unless-stopped
     environment:

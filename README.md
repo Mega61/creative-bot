@@ -89,7 +89,7 @@ uv run creative-bot bot
 ### Run on the server (Portainer, Git mode)
 
 Same pattern as the other stacks: pushing to `main` runs the tests, builds the image to
-`ghcr.io/mega61/creative-bot`, and commits its digest to `deploy/.env`. Portainer polls the
+`ghcr.io/mega61/creative-bot`, and commits its digest into `deploy/stack.yml`. Portainer polls the
 repo and redeploys. Rollback = `git revert` the deploy commit.
 
 One-time setup in Portainer: **Stacks → Add stack → Repository**
