@@ -34,7 +34,7 @@ from .config import Settings
 from .formats import FORMATS
 from .gemini import IMAGE_MODELS, model_label
 from .session import Round, Session
-from .studio import Studio
+from .studio import ImageTooLarge, Studio
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +57,8 @@ class ChatState:
     model: str | None = None  # image model picked with /modelo (otherwise IMAGE_MODEL)
     proposals: dict[str, str] = field(default_factory=dict)  # message_id -> "sid:r01-a"
     pending: Pending | None = None
+    awaiting_upscale: bool = False  # /upscale was sent alone; the next image gets upscaled
+    upscale_album: str | None = None  # media_group_id whose images all get upscaled
 
 
 class Bot:
@@ -138,7 +140,9 @@ class Bot:
             "3. Te mando 2 propuestas (A y B).\n"
             "4. Escribe qué cambiar → nueva ronda desde las fotos originales.\n"
             "   Responde a la foto A o B con el cambio → edito esa imagen exacta.\n"
-            "5. ✅ en la que te guste → original + versión escalada.\n\n"
+            "5. ✅ en la que te guste → eliges logo en la esquina y si la escalo x2.\n\n"
+            "/upscale escalar x2 cualquier imagen: responde /upscale a la imagen, o envíala\n"
+            "   con /upscale como texto (mejor como archivo).\n"
             "/prompt ver el prompt actual · /deshacer volver una ronda · /otra repetir\n"
             "/modelo cambiar el modelo de imagen (aplica desde la siguiente ronda)\n"
             "/marca <id> cambiar marca · /chatid ver el id de este chat"
@@ -213,16 +217,64 @@ class Bot:
 
     # --- incoming photos and text ------------------------------------------------------
 
+    async def cmd_upscale(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self.allowed(update):
+            return
+        msg = update.effective_message
+        target = msg.reply_to_message
+        st = self.chat(update.effective_chat.id)
+        if target and (ref := st.proposals.get(str(target.message_id))):
+            # One of our proposals: use the full-quality file, not Telegram's JPEG preview.
+            sid, image_label = ref.split(":")
+            s = self.session_for(update.effective_chat.id, sid)
+            if s:
+                await self.upscale_and_send(msg, s.image_path(image_label).read_bytes())
+                return
+        if target and (target.photo or _image_document(target)):
+            await self.upscale_and_send(msg, await _download(target), compressed=bool(target.photo))
+            return
+        st.awaiting_upscale = True
+        await msg.reply_text("Envíame la imagen a escalar (mejor como archivo, no como foto).")
+
+    async def upscale_and_send(self, msg: Message, data: bytes, compressed: bool = False) -> None:
+        note = await msg.reply_text("Escalando x2…")
+        try:
+            async with _typing(msg, ChatAction.UPLOAD_DOCUMENT):
+                path, size = await self.studio.upscale_any(data)
+        except ImageTooLarge as e:
+            await note.edit_text(f"Esa imagen ya es muy grande ({e}); escalo hasta 3072 px de lado.")
+            return
+        except Exception as e:
+            log.exception("upscale failed")
+            await note.edit_text(f"Falló el escalado: {str(e)[:500]}")
+            return
+        caption = f"Escalada x2 ({self.studio.upscaler.method}) · {size}"
+        if compressed:
+            caption += "\nLlegó como foto comprimida; envíala como archivo para mejor resultado."
+        with open(path, "rb") as f:
+            await msg.reply_document(f, filename=f"upscaled-{path.name}", caption=caption)
+        await note.delete()
+
     async def on_image(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await self.allowed(update) or not await self.require_brand(update):
+        if not await self.allowed(update):
             return
         msg = update.effective_message
         chat_id = update.effective_chat.id
         st = self.chat(chat_id)
+
+        # /upscale as the caption, right after a bare /upscale, or the rest of such an album.
+        wants_upscale = (msg.caption or "").strip().lower().startswith("/upscale") or st.awaiting_upscale
+        if wants_upscale or (msg.media_group_id and msg.media_group_id == st.upscale_album):
+            st.awaiting_upscale = False
+            st.upscale_album = msg.media_group_id or None
+            await self.upscale_and_send(msg, await _download(msg), compressed=bool(msg.photo))
+            return
+
+        if not await self.require_brand(update):
+            return
         if st.pending is None or (not msg.media_group_id and st.pending.refs and st.pending.brief):
             st.pending = Pending(user=update.effective_user.first_name)
-        file = await (msg.document or msg.photo[-1]).get_file()
-        st.pending.refs.append(bytes(await file.download_as_bytearray()))
+        st.pending.refs.append(await _download(msg))
         if msg.caption:
             st.pending.brief = (st.pending.brief + "\n" + msg.caption).strip()
 
@@ -300,18 +352,19 @@ class Bot:
             await self.cmd_prompt(update, ctx)
         elif action == "pick":  # pick:<sid>:<label>
             sid, image_label = arg.split(":")
+            fin = f"fin:{sid}:{image_label}"  # fin:<sid>:<label>:<logo 0|1>:<upscale 0|1>
             buttons = [
-                [Btn("Sin logo", callback_data=f"fin:{sid}:{image_label}:0")],
-                [Btn("Con logo en la esquina", callback_data=f"fin:{sid}:{image_label}:1")],
+                [Btn("Sin logo", callback_data=f"{fin}:0:0"), Btn("Sin logo + escalar x2", callback_data=f"{fin}:0:1")],
+                [Btn("Logo esquina", callback_data=f"{fin}:1:0"), Btn("Logo esquina + escalar x2", callback_data=f"{fin}:1:1")],
             ]
             await q.message.reply_text(
-                f"Elegida {image_label.upper()}. ¿Agrego el logo en la esquina?",
+                f"Elegida {image_label.upper()}. ¿Cómo la quieres?",
                 reply_markup=InlineKeyboardMarkup(buttons),
             )
         elif action == "fin":
-            sid, image_label, logo = arg.split(":")
+            sid, image_label, logo, upscale = arg.split(":")
             await q.edit_message_reply_markup(None)
-            await self.finalize(q.message, chat_id, sid, image_label, logo == "1")
+            await self.finalize(q.message, chat_id, sid, image_label, logo == "1", upscale == "1")
 
     # --- work --------------------------------------------------------------------------
 
@@ -386,14 +439,16 @@ class Bot:
         text += "\n\nEscribe qué cambiar, o responde a una foto para editar esa."
         await msg.chat.send_message(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([pick_row, tools]))
 
-    async def finalize(self, msg: Message, chat_id: int, sid: str, image_label: str, logo: bool) -> None:
+    async def finalize(
+        self, msg: Message, chat_id: int, sid: str, image_label: str, logo: bool, upscale: bool
+    ) -> None:
         lock = self.lock(chat_id)
         async with lock:
             s = self.session_for(chat_id, sid)
-            await msg.reply_text("Preparando los archivos finales (escalado x2)…")
+            await msg.reply_text("Preparando los archivos finales" + (" (escalado x2)…" if upscale else "…"))
             try:
                 async with _typing(msg, ChatAction.UPLOAD_DOCUMENT):
-                    files = await self.studio.finalize(s, image_label, corner_logo=logo)
+                    files = await self.studio.finalize(s, image_label, corner_logo=logo, upscale=upscale)
             except Exception as e:
                 log.exception("finalize failed")
                 await msg.reply_text(f"Falló el final: {str(e)[:500]}")
@@ -411,6 +466,16 @@ class Bot:
                         f, filename=f"{s.brand}-{s.id}-{image_label}-{path.name}", caption=captions[key]
                     )
             await msg.chat.send_message(f"Listo · {info['size']}. Para empezar otra: envía fotos o /nuevo.")
+
+
+def _image_document(msg: Message) -> bool:
+    return bool(msg.document and (msg.document.mime_type or "").startswith("image/"))
+
+
+async def _download(msg: Message) -> bytes:
+    """The image in a message: the file as sent, or the largest size of a (compressed) photo."""
+    file = await (msg.document or msg.photo[-1]).get_file()
+    return bytes(await file.download_as_bytearray())
 
 
 def _preview(path: Path) -> bytes:
@@ -458,6 +523,7 @@ def run(settings: Settings) -> None:
                 ("nuevo", "Empezar sin fotos: /nuevo <instrucciones>"),
                 ("modelo", "Cambiar el modelo de imagen"),
                 ("otra", "Repetir con el mismo prompt"),
+                ("upscale", "Escalar x2 una imagen (responde a ella)"),
                 ("deshacer", "Volver a la ronda anterior"),
                 ("prompt", "Ver el prompt actual"),
                 ("chatid", "Ver ids de este chat y tuyo"),
@@ -476,6 +542,7 @@ def run(settings: Settings) -> None:
     app.add_handler(CommandHandler("marca", bot.cmd_brand))
     app.add_handler(CommandHandler("nuevo", bot.cmd_new))
     app.add_handler(CommandHandler("modelo", bot.cmd_model))
+    app.add_handler(CommandHandler("upscale", bot.cmd_upscale))
     app.add_handler(CommandHandler("prompt", bot.cmd_prompt))
     app.add_handler(CommandHandler("deshacer", bot.cmd_undo))
     app.add_handler(CommandHandler("otra", bot.cmd_retry))

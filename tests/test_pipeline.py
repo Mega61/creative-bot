@@ -73,6 +73,9 @@ def test_full_flow(studio):
     assert set(files) == {"original", "upscaled", "original+logo", "upscaled+logo"}
     assert Image.open(files["upscaled"]).size == (720, 1280)
 
+    files = asyncio.run(studio.finalize(s, "r03-b", corner_logo=False, upscale=False))
+    assert set(files) == {"original"} and s.finals["r03-b"]["upscale_method"] is None
+
     reloaded = studio.load_session("golden", s.id)
     assert [r.n for r in reloaded.rounds] == [1, 3]
     assert reloaded.images_generated == 6
@@ -84,6 +87,18 @@ def test_partial_failure_keeps_labels(studio):
     rnd = asyncio.run(studio.first_round(s))
     assert Session.labels(rnd) == ["r01-b"] and rnd.errors == ["blocked"]
     assert s.image_path("r01-b").name == "b.png"
+
+
+def test_upscale_any(studio):
+    from creative_bot.studio import ImageTooLarge
+
+    path, size = asyncio.run(studio.upscale_any(_photo(rotated=True)))
+    assert Image.open(path).size == (400, 600) and size == "200x300 -> 400x600"
+
+    big = io.BytesIO()
+    Image.new("RGB", (4000, 3000)).save(big, "PNG")
+    with pytest.raises(ImageTooLarge):
+        asyncio.run(studio.upscale_any(big.getvalue()))
 
 
 def test_corner_logo_stays_out_of_story_ui(studio):

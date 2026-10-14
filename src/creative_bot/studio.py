@@ -3,6 +3,8 @@
 import asyncio
 import io
 import logging
+import secrets
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image
@@ -24,6 +26,11 @@ from .session import Round, Session
 log = logging.getLogger(__name__)
 
 TELEGRAM_DOC_LIMIT = 45 * 1024 * 1024  # bot uploads cap at 50 MB
+MAX_UPSCALE_EDGE = 3072  # x2 of this is already ~6K; bigger inputs would blow the 3 GB RAM cap
+
+
+class ImageTooLarge(ValueError):
+    pass
 
 
 class Studio:
@@ -32,6 +39,7 @@ class Studio:
         self._gemini = gemini
         self._brands: dict[str, Brand] = {}
         self.upscaler = Upscaler(settings.upscale_weights, settings.upscale_tile)
+        self._upscale_lock = asyncio.Lock()  # one job at a time on the GPU
 
     @property
     def gemini(self) -> Gemini:
@@ -90,29 +98,52 @@ class Studio:
             s.save()
         return s.last
 
-    async def finalize(self, s: Session, image_label: str, corner_logo: bool = False) -> dict[str, Path]:
-        """Deliverables for the approved proposal: the original exactly as generated, and an
-        upscaled copy of that same picture. Optionally both again with the corner logo."""
+    async def finalize(
+        self, s: Session, image_label: str, corner_logo: bool = False, upscale: bool = True
+    ) -> dict[str, Path]:
+        """Deliverables for the approved proposal: the original exactly as generated and, if
+        asked, an upscaled copy of that same picture. Optionally all with the corner logo."""
         src = s.image_path(image_label)
         out_dir = s.path(f"final/{image_label}")
         out_dir.mkdir(parents=True, exist_ok=True)
 
         original = Image.open(src).convert("RGB")
-        upscaled = await asyncio.to_thread(self.upscaler.upscale, original)
+        versions = {"original": original}
+        if upscale:
+            versions["upscaled"] = await self._upscale(original)
 
-        files = {"original": _save(original, out_dir / "original"), "upscaled": _save(upscaled, out_dir / "upscaled")}
-        if corner_logo:
-            brand, fmt = self.brand(s.brand), FORMATS[s.format]
-            files["original+logo"] = _save(stamp_corner_logo(original, brand, fmt), out_dir / "original-logo")
-            files["upscaled+logo"] = _save(stamp_corner_logo(upscaled, brand, fmt), out_dir / "upscaled-logo")
+        files = {}
+        for key, img in versions.items():
+            files[key] = _save(img, out_dir / key)
+            if corner_logo:
+                stamped = stamp_corner_logo(img, self.brand(s.brand), FORMATS[s.format])
+                files[f"{key}+logo"] = _save(stamped, out_dir / f"{key}-logo")
 
+        size = f"{original.width}x{original.height}"
+        if upscale:
+            size += f" -> {versions['upscaled'].width}x{versions['upscaled'].height}"
         s.finals[image_label] = {
             "files": {k: str(p.relative_to(s.dir)) for k, p in files.items()},
-            "upscale_method": self.upscaler.method,
-            "size": f"{original.width}x{original.height} -> {upscaled.width}x{upscaled.height}",
+            "upscale_method": self.upscaler.method if upscale else None,
+            "size": size,
         }
         s.save()
         return files
+
+    async def upscale_any(self, data: bytes) -> tuple[Path, str]:
+        """/upscale: any image, not tied to a brand or session. Returns (file, size note)."""
+        img = normalize_reference(data, max_edge=None).convert("RGB")
+        if max(img.size) > MAX_UPSCALE_EDGE:
+            raise ImageTooLarge(f"{img.width}x{img.height}")
+        out = await self._upscale(img)
+        out_dir = self.settings.data_dir / "upscales"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+        return _save(out, out_dir / stem), f"{img.width}x{img.height} -> {out.width}x{out.height}"
+
+    async def _upscale(self, img: Image.Image) -> Image.Image:
+        async with self._upscale_lock:
+            return await asyncio.to_thread(self.upscaler.upscale, img)
 
     # --- internals ---------------------------------------------------------------------
 

@@ -14,11 +14,12 @@ log = logging.getLogger(__name__)
 MAX_REF_EDGE = 2048  # references larger than this add upload time, not quality
 
 
-def normalize_reference(data: bytes) -> Image.Image:
+def normalize_reference(data: bytes, max_edge: int | None = MAX_REF_EDGE) -> Image.Image:
     """Apply the EXIF rotation to the pixels (phone photos), drop the tag, cap the size."""
     img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
     img = img.convert("RGBA" if img.mode in ("RGBA", "LA", "P") else "RGB")
-    img.thumbnail((MAX_REF_EDGE, MAX_REF_EDGE), Image.LANCZOS)
+    if max_edge:
+        img.thumbnail((max_edge, max_edge), Image.LANCZOS)
     return img
 
 

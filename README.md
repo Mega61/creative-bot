@@ -23,11 +23,15 @@ Supersedes the single-brand draft in `../cassis-originals-social-media/creative-
    - **Reply to photo A or B** with the change → the model edits that exact image. Use this
      when one is almost right.
    - 🔁 Otra vez = same prompt, new pair. `/deshacer` = go back one round. 📝 Prompt = see it.
-5. ✅ on the one you like → choose with or without the corner logo → you get files:
+5. ✅ on the one you like → one tap: with/without the corner logo, with/without upscaling:
    - `original` — exactly the image you approved
-   - `upscaled` — the same picture at 2× (Real-ESRGAN). Sharper edges and text, but it can
-     smooth fine textures. Compare both and post whichever looks better.
-   - `+logo` versions of both, if you asked for the corner logo.
+   - `upscaled` (if chosen) — the same picture at 2× (Real-ESRGAN on the GPU). Sharper edges
+     and text, but it can smooth fine textures. Compare both and post whichever looks better.
+   - `+logo` versions, if you asked for the corner logo.
+
+`/upscale` works on any image, at any time: reply `/upscale` to it (a proposal, a photo, a
+file), send an image with `/upscale` as the caption, or send `/upscale` and then the image.
+Up to 3072 px per side; send it as a file for the best result.
 
 ## Two ways a logo ends up in an image
 
