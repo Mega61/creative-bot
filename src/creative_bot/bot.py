@@ -7,6 +7,7 @@ Flow in a brand group:
   4. Write feedback as a normal message -> new round from the original references.
      Reply to one proposal's photo with feedback -> the model edits that exact image.
   5. ✅ on a proposal -> original + upscaled files (optionally with the corner logo).
+  Any time: /cancelar drops the flow; /reiniciar keeps the reference photos and asks for a new brief.
 """
 
 import asyncio
@@ -144,6 +145,7 @@ class Bot:
             "/upscale escalar x2 cualquier imagen: responde /upscale a la imagen, o envíala\n"
             "   con /upscale como texto (mejor como archivo).\n"
             "/prompt ver el prompt actual · /deshacer volver una ronda · /otra repetir\n"
+            "/reiniciar otra idea con las mismas fotos · /cancelar descartar todo\n"
             "/modelo cambiar el modelo de imagen (aplica desde la siguiente ronda)\n"
             "/marca <id> cambiar marca · /chatid ver el id de este chat"
         )
@@ -214,6 +216,50 @@ class Bot:
         if not await self.allowed(update):
             return
         await self.run_round(update.effective_message, update.effective_chat.id, mode="retry")
+
+    async def cmd_cancel(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self.allowed(update):
+            return
+        await self.cancel(update.effective_message, update.effective_chat.id)
+
+    async def cmd_restart(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self.allowed(update) or not await self.require_brand(update):
+            return
+        await self.restart(update.effective_message, update.effective_chat.id, " ".join(ctx.args))
+
+    async def cancel(self, msg: Message, chat_id: int) -> None:
+        st = self.chat(chat_id)
+        if task := self.album_tasks.pop(chat_id, None):
+            task.cancel()
+        had_flow = st.pending is not None or st.session is not None
+        st.pending, st.session, st.proposals = None, None, {}
+        st.awaiting_upscale, st.upscale_album = False, None
+        self._save_state()
+        await msg.reply_text(
+            ("Cancelado. " if had_flow else "No había nada en curso. ")
+            + "Para empezar otra: envía fotos con instrucciones o /nuevo."
+        )
+
+    async def restart(self, msg: Message, chat_id: int, brief: str = "") -> None:
+        """Same reference photos, new idea: drop the session and ask for a new brief."""
+        st = self.chat(chat_id)
+        s = self.session_for(chat_id)
+        if s:
+            refs = [s.path(r).read_bytes() for r in s.refs]
+        elif st.pending:
+            refs = st.pending.refs
+        else:
+            await msg.reply_text("No hay nada en curso. Envía fotos con instrucciones o /nuevo.")
+            return
+        st.session, st.proposals = None, {}
+        st.pending = Pending(refs=refs, brief=brief, user=msg.from_user.first_name if msg.from_user else "")
+        self._save_state()
+        if brief:
+            await self.ask_format(msg)
+        elif refs:
+            await msg.reply_text(f"Empezamos de nuevo con las mismas {len(refs)} foto(s). ¿Qué quieres crear?")
+        else:
+            await msg.reply_text("Empezamos de nuevo. ¿Qué quieres crear? Escribe las instrucciones.")
 
     # --- incoming photos and text ------------------------------------------------------
 
@@ -318,6 +364,7 @@ class Bot:
 
     async def ask_format(self, msg: Message) -> None:
         buttons = [[Btn(f.label, callback_data=f"fmt:{f.key}")] for f in FORMATS.values()]
+        buttons.append([Btn("✖️ Cancelar", callback_data="cancel")])
         model = model_label(self.model_for(msg.chat_id))
         await msg.reply_text(
             f"¿Para qué formato? (modelo: {model} · /modelo para cambiar)",
@@ -346,6 +393,12 @@ class Bot:
         elif action == "fmt":
             await q.edit_message_reply_markup(None)
             await self.start_session(q.message, chat_id, arg)
+        elif action == "cancel":
+            await q.edit_message_reply_markup(None)
+            await self.cancel(q.message, chat_id)
+        elif action == "restart":
+            await q.edit_message_reply_markup(None)
+            await self.restart(q.message, chat_id)
         elif action == "retry":
             await self.run_round(q.message, chat_id, mode="retry")
         elif action == "prompt":
@@ -417,6 +470,8 @@ class Bot:
                 log.exception("round failed")
                 await msg.reply_text(f"Falló la generación: {str(e)[:500]}\nPrueba /otra o reformula.")
                 return
+            if self.chat(chat_id).session != s.id:
+                return  # cancelled or restarted while generating
             await self.send_round(msg, chat_id, s, rnd)
 
     async def send_round(self, msg: Message, chat_id: int, s: Session, rnd: Round) -> None:
@@ -433,11 +488,12 @@ class Bot:
 
         pick_row = [Btn(f"✅ {lab[-1].upper()}", callback_data=f"pick:{s.id}:{lab}") for lab in labels]
         tools = [Btn("🔁 Otra vez", callback_data="retry"), Btn("📝 Prompt", callback_data="prompt")]
+        restart_row = [Btn("💡 Nueva idea", callback_data="restart"), Btn("✖️ Cancelar", callback_data="cancel")]
         text = f"<b>Ronda {rnd.n}</b> · {model_label(rnd.model or self.s.image_model)}\n{_escape(rnd.change_summary)}"
         if rnd.errors:
             text += f"\n({len(rnd.errors)} propuesta(s) fallaron)"
         text += "\n\nEscribe qué cambiar, o responde a una foto para editar esa."
-        await msg.chat.send_message(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([pick_row, tools]))
+        await msg.chat.send_message(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup([pick_row, tools, restart_row]))
 
     async def finalize(
         self, msg: Message, chat_id: int, sid: str, image_label: str, logo: bool, upscale: bool
@@ -525,6 +581,8 @@ def run(settings: Settings) -> None:
                 ("otra", "Repetir con el mismo prompt"),
                 ("upscale", "Escalar x2 una imagen (responde a ella)"),
                 ("deshacer", "Volver a la ronda anterior"),
+                ("reiniciar", "Otra idea con las mismas fotos"),
+                ("cancelar", "Descartar lo que está en curso"),
                 ("prompt", "Ver el prompt actual"),
                 ("chatid", "Ver ids de este chat y tuyo"),
             ]
@@ -546,6 +604,8 @@ def run(settings: Settings) -> None:
     app.add_handler(CommandHandler("prompt", bot.cmd_prompt))
     app.add_handler(CommandHandler("deshacer", bot.cmd_undo))
     app.add_handler(CommandHandler("otra", bot.cmd_retry))
+    app.add_handler(CommandHandler(["cancelar", "cancel"], bot.cmd_cancel))
+    app.add_handler(CommandHandler(["reiniciar", "restart"], bot.cmd_restart))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, bot.on_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.on_text))
     app.add_handler(CallbackQueryHandler(bot.on_button))

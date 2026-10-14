@@ -23,6 +23,8 @@ Supersedes the single-brand draft in `../cassis-originals-social-media/creative-
    - **Reply to photo A or B** with the change → the model edits that exact image. Use this
      when one is almost right.
    - 🔁 Otra vez = same prompt, new pair. `/deshacer` = go back one round. 📝 Prompt = see it.
+   - Don't like the idea at all? 💡 Nueva idea / `/reiniciar [brief]` keeps the same
+     reference photos and asks for a new brief. ✖️ Cancelar / `/cancelar` drops everything.
 5. ✅ on the one you like → one tap: with/without the corner logo, with/without upscaling:
    - `original` — exactly the image you approved
    - `upscaled` (if chosen) — the same picture at 2× (Real-ESRGAN on the GPU). Sharper edges
