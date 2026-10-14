@@ -19,7 +19,7 @@ volumes:
 
 services:
   bot:
-    image: ghcr.io/mega61/creative-bot@sha256:3630c4b81471acf944e455194ecb274647a73b430c25aa6d72c7257f5a741359
+    image: ghcr.io/mega61/creative-bot@sha256:ea771a2186298d1b52c5346274240da8ccc1ed6bac991c341a0c49a4243130f6
     container_name: creative-bot
     restart: unless-stopped
     environment:
