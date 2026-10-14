@@ -39,3 +39,13 @@ services:
     # a 2K post on 4 cores. Rounds themselves run on Google's side and cost ~nothing here.
     cpus: ${CPU_LIMIT:-4}
     mem_limit: 3g
+    # The final upscale runs on the server's GTX 1060 (~650 MB VRAM, seconds instead of
+    # minutes). Needs the NVIDIA Container Toolkit on the host (verified 2026-10-14,
+    # driver 580.178). Without this block the bot still works, upscaling on CPU.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
