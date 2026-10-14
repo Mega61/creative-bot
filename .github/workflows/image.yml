@@ -61,8 +61,10 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE }}:sha-${{ steps.vars.outputs.short }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Registry cache next to the image: unchanged layers are referenced, not
+          # re-downloaded or re-uploaded (the gha cache moved the 3 GB layer every build).
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
           provenance: false
 
       - name: Write digest to deploy/stack.yml
