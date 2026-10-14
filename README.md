@@ -95,10 +95,10 @@ repo and redeploys. Rollback = `git revert` the deploy commit.
 One-time setup in Portainer: **Stacks → Add stack → Repository**
 - Repository: `https://github.com/Mega61/creative-bot`, reference `refs/heads/main`
 - Compose path: `deploy/stack.yml`
-- Authentication: GitHub user and token (private repo)
+- Authentication: none (public repo)
 - GitOps updates: on, polling
 - Environment variables: `GEMINI_API_KEY`, `TELEGRAM_TOKEN`, `ALLOWED_USER_IDS`, `CHAT_BRANDS`
-- `ghcr.io` must be in Portainer's registries (same credentials as the other `ghcr.io/mega61` images)
+- The image on GHCR is public: no registry credentials needed
 
 No ports, networks, proxy or database needed. Sessions live in the `creative_bot_data` volume.
 `docker-compose.local.yml` builds and runs the image locally from `.env`.

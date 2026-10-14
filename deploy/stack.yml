@@ -6,8 +6,8 @@
 # never goes in the repo:
 #
 #   GEMINI_API_KEY     TELEGRAM_TOKEN
-#   ALLOWED_USER_IDS   e.g. 1617582548,222222222
-#   CHAT_BRANDS        e.g. -5321330039:golden,-100xxxxxxxxxx:cassis
+#   ALLOWED_USER_IDS   e.g. 111111111,222222222
+#   CHAT_BRANDS        e.g. -1001111111111:golden,-1002222222222:cassis
 #
 # Outbound traffic only (Telegram long polling + Gemini API): no ports, networks or Caddy.
 # State is plain files in the `creative_bot_data` volume; there is no database.
