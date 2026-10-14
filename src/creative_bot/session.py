@@ -26,6 +26,7 @@ class Round:
     uses_logo_reference: bool
     feedback: str | None = None
     edit_of: str | None = None  # "r02-b" when this round edits a chosen proposal
+    model: str | None = None  # image model used for this round
     images: list[str] = field(default_factory=list)  # paths relative to the session dir
     errors: list[str] = field(default_factory=list)
 

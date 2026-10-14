@@ -62,25 +62,27 @@ class Studio:
         s.save()
         return s
 
-    async def first_round(self, s: Session) -> Round:
+    async def first_round(self, s: Session, model: str | None = None) -> Round:
         refined = await self._refine(s)
-        return await self._generate(s, refined)
+        return await self._generate(s, refined, model=model)
 
-    async def revise(self, s: Session, feedback: str, edit_label: str | None = None) -> Round:
+    async def revise(
+        self, s: Session, feedback: str, edit_label: str | None = None, model: str | None = None
+    ) -> Round:
         """Feedback round. With edit_label ('r02-b') the model edits that proposal instead of
         re-generating from the original references."""
         refined = await self._refine(s, feedback=feedback, edit_label=edit_label)
-        return await self._generate(s, refined, feedback=feedback, edit_label=edit_label)
+        return await self._generate(s, refined, feedback=feedback, edit_label=edit_label, model=model)
 
-    async def retry(self, s: Session) -> Round:
-        """Same prompt, fresh proposals."""
+    async def retry(self, s: Session, model: str | None = None) -> Round:
+        """Same prompt, fresh proposals (optionally with another model, to compare)."""
         last = s.last
         refined = RefinedPrompt(
             prompt=last.prompt,
             uses_logo_reference=last.uses_logo_reference,
             change_summary="Mismo prompt, nuevas propuestas.",
         )
-        return await self._generate(s, refined, edit_label=last.edit_of)
+        return await self._generate(s, refined, edit_label=last.edit_of, model=model)
 
     def undo(self, s: Session) -> Round | None:
         if len(s.rounds) > 1:
@@ -140,8 +142,10 @@ class Studio:
         refined: RefinedPrompt,
         feedback: str | None = None,
         edit_label: str | None = None,
+        model: str | None = None,
     ) -> Round:
         brand, fmt = self.brand(s.brand), FORMATS[s.format]
+        model = model or self.settings.image_model
         images = []
         if edit_src := self._edit_source(s, edit_label):
             images.append(edit_src.read_bytes())
@@ -159,6 +163,7 @@ class Studio:
             uses_logo_reference=refined.uses_logo_reference,
             feedback=feedback,
             edit_of=edit_label,
+            model=model,
         )
         round_dir = s.path(f"rounds/r{n:02d}")
         round_dir.mkdir(parents=True, exist_ok=True)
@@ -166,7 +171,7 @@ class Studio:
 
         results = await asyncio.gather(
             *(
-                self.gemini.image(refined.prompt, images, fmt.aspect_ratio, self.settings.draft_size)
+                self.gemini.image(refined.prompt, images, fmt.aspect_ratio, self.settings.draft_size, model)
                 for _ in range(self.settings.proposals)
             ),
             return_exceptions=True,

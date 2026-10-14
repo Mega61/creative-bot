@@ -10,6 +10,19 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 
+# Image models the team can pick from in Telegram (/modelo). Prices per image, Standard tier,
+# from ai.google.dev/gemini-api/docs/pricing (checked 2026-10-14).
+IMAGE_MODELS = {
+    "gemini-nano-banana-2.1": "Nano Banana 2.1 · $0.05",
+    "gemini-3.1-flash-image": "Nano Banana 2 · $0.10",
+    "gemini-3-pro-image": "Nano Banana Pro · $0.13",
+}
+
+
+def model_label(model: str) -> str:
+    return IMAGE_MODELS.get(model, model).split(" · ")[0]
+
+
 class GenerationError(RuntimeError):
     pass
 
@@ -44,10 +57,12 @@ class Gemini:
         )
         return schema.model_validate_json(interaction.output_text)
 
-    async def image(self, prompt: str, images: list[bytes], aspect_ratio: str, size: str) -> bytes:
+    async def image(
+        self, prompt: str, images: list[bytes], aspect_ratio: str, size: str, model: str | None = None
+    ) -> bytes:
         parts = [text_part(prompt)] + [image_part(b) for b in images]
         interaction = await self.client.aio.interactions.create(
-            model=self.image_model,
+            model=model or self.image_model,
             input=parts,
             response_format={"type": "image", "aspect_ratio": aspect_ratio, "image_size": size},
             store=False,

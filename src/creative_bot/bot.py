@@ -32,6 +32,7 @@ from telegram.ext import (
 from .brand import list_brands
 from .config import Settings
 from .formats import FORMATS
+from .gemini import IMAGE_MODELS, model_label
 from .session import Round, Session
 from .studio import Studio
 
@@ -53,6 +54,7 @@ class Pending:
 class ChatState:
     brand: str | None = None  # override set with /marca (otherwise from CHAT_BRANDS)
     session: str | None = None
+    model: str | None = None  # image model picked with /modelo (otherwise IMAGE_MODEL)
     proposals: dict[str, str] = field(default_factory=dict)  # message_id -> "sid:r01-a"
     pending: Pending | None = None
 
@@ -72,12 +74,15 @@ class Bot:
         if not self.state_file.exists():
             return {}
         raw = json.loads(self.state_file.read_text())
-        return {int(k): ChatState(v.get("brand"), v.get("session"), v.get("proposals", {})) for k, v in raw.items()}
+        return {
+            int(k): ChatState(v.get("brand"), v.get("session"), v.get("model"), v.get("proposals", {}))
+            for k, v in raw.items()
+        }
 
     def _save_state(self) -> None:
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            str(k): {"brand": v.brand, "session": v.session, "proposals": v.proposals}
+            str(k): {"brand": v.brand, "session": v.session, "model": v.model, "proposals": v.proposals}
             for k, v in self.chats.items()
         }
         self.state_file.write_text(json.dumps(data, indent=2))
@@ -87,6 +92,9 @@ class Bot:
 
     def brand_for(self, chat_id: int) -> str | None:
         return self.chat(chat_id).brand or self.s.chat_brands.get(chat_id)
+
+    def model_for(self, chat_id: int) -> str:
+        return self.chat(chat_id).model or self.s.image_model
 
     def session_for(self, chat_id: int, sid: str | None = None) -> Session | None:
         brand, sid = self.brand_for(chat_id), sid or self.chat(chat_id).session
@@ -120,8 +128,9 @@ class Bot:
         if not await self.allowed(update):
             return
         brand = self.brand_for(update.effective_chat.id) or "ninguna"
+        model = model_label(self.model_for(update.effective_chat.id))
         await update.effective_message.reply_text(
-            f"Marca de este chat: {brand}\n\n"
+            f"Marca de este chat: {brand} · Modelo: {model}\n\n"
             "1. Envía foto(s) de referencia con las instrucciones en el texto de la foto.\n"
             "   (Mejor calidad: envíalas como archivo, no como foto.)\n"
             "   Sin fotos: /nuevo <instrucciones>\n"
@@ -131,6 +140,7 @@ class Bot:
             "   Responde a la foto A o B con el cambio → edito esa imagen exacta.\n"
             "5. ✅ en la que te guste → original + versión escalada.\n\n"
             "/prompt ver el prompt actual · /deshacer volver una ronda · /otra repetir\n"
+            "/modelo cambiar el modelo de imagen (aplica desde la siguiente ronda)\n"
             "/marca <id> cambiar marca · /chatid ver el id de este chat"
         )
 
@@ -151,6 +161,19 @@ class Bot:
         st.brand, st.session, st.proposals = ctx.args[0], None, {}
         self._save_state()
         await update.effective_message.reply_text(f"Marca: {self.studio.brand(st.brand).name}")
+
+    async def cmd_model(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not await self.allowed(update):
+            return
+        current = self.model_for(update.effective_chat.id)
+        buttons = [
+            [Btn(("● " if m == current else "") + label, callback_data=f"model:{m}")]
+            for m, label in IMAGE_MODELS.items()
+        ]
+        await update.effective_message.reply_text(
+            "Modelo de imagen (precio por imagen a 2K; cada ronda son 2):",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     async def cmd_new(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self.allowed(update) or not await self.require_brand(update):
@@ -243,7 +266,11 @@ class Bot:
 
     async def ask_format(self, msg: Message) -> None:
         buttons = [[Btn(f.label, callback_data=f"fmt:{f.key}")] for f in FORMATS.values()]
-        await msg.reply_text("¿Para qué formato?", reply_markup=InlineKeyboardMarkup(buttons))
+        model = model_label(self.model_for(msg.chat_id))
+        await msg.reply_text(
+            f"¿Para qué formato? (modelo: {model} · /modelo para cambiar)",
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
 
     # --- buttons -----------------------------------------------------------------------
 
@@ -256,7 +283,15 @@ class Bot:
         chat_id = update.effective_chat.id
         action, _, arg = q.data.partition(":")
 
-        if action == "fmt":
+        if action == "model":
+            st = self.chat(chat_id)
+            st.model = arg
+            self._save_state()
+            await q.edit_message_text(
+                f"Modelo: {model_label(arg)}. Aplica desde la siguiente ronda; "
+                "🔁 Otra vez repite el mismo prompt con este modelo."
+            )
+        elif action == "fmt":
             await q.edit_message_reply_markup(None)
             await self.start_session(q.message, chat_id, arg)
         elif action == "retry":
@@ -318,12 +353,13 @@ class Bot:
             await msg.reply_text(note)
             try:
                 async with _typing(msg, ChatAction.UPLOAD_PHOTO):
+                    model = self.model_for(chat_id)
                     if mode == "first":
-                        rnd = await self.studio.first_round(s)
+                        rnd = await self.studio.first_round(s, model)
                     elif mode == "retry":
-                        rnd = await self.studio.retry(s)
+                        rnd = await self.studio.retry(s, model)
                     else:
-                        rnd = await self.studio.revise(s, feedback, edit_label)
+                        rnd = await self.studio.revise(s, feedback, edit_label, model)
             except Exception as e:  # report and keep the session usable
                 log.exception("round failed")
                 await msg.reply_text(f"Falló la generación: {str(e)[:500]}\nPrueba /otra o reformula.")
@@ -344,7 +380,7 @@ class Bot:
 
         pick_row = [Btn(f"✅ {lab[-1].upper()}", callback_data=f"pick:{s.id}:{lab}") for lab in labels]
         tools = [Btn("🔁 Otra vez", callback_data="retry"), Btn("📝 Prompt", callback_data="prompt")]
-        text = f"<b>Ronda {rnd.n}</b> · {_escape(rnd.change_summary)}"
+        text = f"<b>Ronda {rnd.n}</b> · {model_label(rnd.model or self.s.image_model)}\n{_escape(rnd.change_summary)}"
         if rnd.errors:
             text += f"\n({len(rnd.errors)} propuesta(s) fallaron)"
         text += "\n\nEscribe qué cambiar, o responde a una foto para editar esa."
@@ -414,11 +450,32 @@ def run(settings: Settings) -> None:
     if not settings.allowed_user_ids:
         log.warning("ALLOWED_USER_IDS is empty: the bot will only answer /chatid")
     bot = Bot(settings)
-    app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
+    async def set_commands(app: Application) -> None:
+        # The "/" menu in Telegram.
+        await app.bot.set_my_commands(
+            [
+                ("ayuda", "Cómo usar el bot"),
+                ("nuevo", "Empezar sin fotos: /nuevo <instrucciones>"),
+                ("modelo", "Cambiar el modelo de imagen"),
+                ("otra", "Repetir con el mismo prompt"),
+                ("deshacer", "Volver a la ronda anterior"),
+                ("prompt", "Ver el prompt actual"),
+                ("chatid", "Ver ids de este chat y tuyo"),
+            ]
+        )
+
+    app = (
+        Application.builder()
+        .token(settings.telegram_token)
+        .concurrent_updates(True)
+        .post_init(set_commands)
+        .build()
+    )
     app.add_handler(CommandHandler(["start", "ayuda", "help"], bot.cmd_help))
     app.add_handler(CommandHandler("chatid", bot.cmd_chatid))
     app.add_handler(CommandHandler("marca", bot.cmd_brand))
     app.add_handler(CommandHandler("nuevo", bot.cmd_new))
+    app.add_handler(CommandHandler("modelo", bot.cmd_model))
     app.add_handler(CommandHandler("prompt", bot.cmd_prompt))
     app.add_handler(CommandHandler("deshacer", bot.cmd_undo))
     app.add_handler(CommandHandler("otra", bot.cmd_retry))

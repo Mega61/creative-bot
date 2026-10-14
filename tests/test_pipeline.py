@@ -22,7 +22,7 @@ class FakeGemini:
         self.refine_calls.append((system, parts))
         return RefinedPrompt(prompt=f"prompt v{len(self.refine_calls)}", uses_logo_reference=True, change_summary="ok")
 
-    async def image(self, prompt, images, aspect_ratio, size):
+    async def image(self, prompt, images, aspect_ratio, size, model=None):
         self.image_calls.append((prompt, len(images), aspect_ratio, size))
         if self.fail_first_image and len(self.image_calls) == 1:
             raise RuntimeError("blocked")
@@ -65,8 +65,9 @@ def test_full_flow(studio):
     assert "PREVIOUS PROMPT:\nprompt v1" in studio.gemini.refine_calls[-1][1][0]["text"]
 
     studio.undo(s)
-    r3 = asyncio.run(studio.retry(s))
+    r3 = asyncio.run(studio.retry(s, model="gemini-3-pro-image"))
     assert r3.n == 3 and r3.prompt == r1.prompt  # undo kept r02's folder, numbering moves on
+    assert (r1.model, r3.model) == ("gemini-nano-banana-2.1", "gemini-3-pro-image")
 
     files = asyncio.run(studio.finalize(s, "r03-a", corner_logo=True))
     assert set(files) == {"original", "upscaled", "original+logo", "upscaled+logo"}
