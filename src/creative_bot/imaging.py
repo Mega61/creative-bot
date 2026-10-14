@@ -77,7 +77,8 @@ def stamp_corner_logo(img: Image.Image, brand: Brand, fmt: Format) -> Image.Imag
 
 
 class Upscaler:
-    """Real-ESRGAN x2 via spandrel on CPU. Same picture, more pixels: no re-generation, no drift.
+    """Real-ESRGAN x2 via spandrel, on the GPU when there is one (seconds) or the CPU (minutes).
+    Same picture, more pixels: no re-generation, no drift.
 
     Falls back to plain Lanczos when torch/spandrel or the weights are missing, and says so
     through `method` so the deliverable is never labelled as something it isn't.
@@ -87,6 +88,7 @@ class Upscaler:
         self.weights = weights
         self.tile = tile
         self._model = None
+        self.device = "cpu"
         self.method = "lanczos"
 
     def _load(self):
@@ -94,7 +96,7 @@ class Upscaler:
             return self._model
         try:
             import spandrel
-            import torch  # noqa: F401
+            import torch
         except ImportError:
             log.warning("torch/spandrel not installed; upscaling falls back to Lanczos")
             return None
@@ -102,7 +104,13 @@ class Upscaler:
             log.warning("upscale weights %s missing; falling back to Lanczos", self.weights)
             return None
         self._model = spandrel.ModelLoader().load_from_file(str(self.weights)).eval()
-        self.method = f"esrgan-x{self._model.scale}"
+        if torch.cuda.is_available():
+            self.device = "cuda"
+            self._model.to("cuda")
+            log.info("upscaler on GPU: %s", torch.cuda.get_device_name(0))
+        else:
+            log.info("upscaler on CPU (no CUDA device visible)")
+        self.method = f"esrgan-x{self._model.scale}-{self.device}"
         return self._model
 
     def upscale(self, img: Image.Image) -> Image.Image:
@@ -127,11 +135,13 @@ class Upscaler:
                     # so tile seams don't show.
                     y0, x0 = max(y - pad, 0), max(x - pad, 0)
                     y1, x1 = min(y + tile + pad, h), min(x + tile + pad, w)
-                    res = model(src[:, :, y0:y1, x0:x1])
+                    res = model(src[:, :, y0:y1, x0:x1].to(self.device)).cpu()
                     cy, cx = (y - y0) * scale, (x - x0) * scale
                     th, tw = (min(y + tile, h) - y) * scale, (min(x + tile, w) - x) * scale
                     out[:, :, y * scale : y * scale + th, x * scale : x * scale + tw] = res[
                         :, :, cy : cy + th, cx : cx + tw
                     ]
+        if self.device == "cuda":
+            torch.cuda.empty_cache()  # hand the VRAM back between finals
         arr = out.squeeze(0).clamp(0, 1).mul(255).round().byte().permute(1, 2, 0).numpy()
         return Image.fromarray(arr)

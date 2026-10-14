@@ -23,16 +23,18 @@ requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
 [project.optional-dependencies]
-# Real-ESRGAN upscaling on CPU. Without it the final step falls back to Lanczos.
+# Real-ESRGAN upscaling (GPU if available, else CPU). Without it the final step uses Lanczos.
 upscale = ["torch>=2.9", "torchvision", "spandrel>=0.4", "numpy>=2"]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
-torchvision = { index = "pytorch-cpu" }
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
 
+# CUDA 12.6 builds: the newest line that still ships Pascal kernels (sm_60, runs on the
+# server's GTX 1060). cu128+ dropped Pascal. Without a GPU the same build runs on CPU.
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [dependency-groups]
