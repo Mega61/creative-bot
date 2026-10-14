@@ -30,7 +30,12 @@ services:
       IMAGE_MODEL: ${IMAGE_MODEL:-gemini-nano-banana-2.1}
       TEXT_MODEL: ${TEXT_MODEL:-gemini-3.8-flash}
       DRAFT_SIZE: ${DRAFT_SIZE:-2K}
+      # PyTorch sizes its thread pool from the host's core count, not the container's CPU cap;
+      # without this it oversubscribes the 4 CPUs and runs slower.
+      OMP_NUM_THREADS: ${CPU_LIMIT:-4}
     volumes:
       - creative_bot_data:/data
-    # The upscaler takes a few CPU-minutes per final image; cap it so it can't starve the VM.
+    # Only the final upscale is heavy: measured ~3 min, ~11 CPU-min and 1.8 GB peak RAM for
+    # a 2K post on 4 cores. Rounds themselves run on Google's side and cost ~nothing here.
     cpus: ${CPU_LIMIT:-4}
+    mem_limit: 3g
