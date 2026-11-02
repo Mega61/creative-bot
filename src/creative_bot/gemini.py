@@ -4,6 +4,7 @@ image model (Nano Banana). A single GEMINI_API_KEY covers both."""
 import base64
 import logging
 
+import httpx
 from google import genai
 from pydantic import BaseModel
 
@@ -27,6 +28,15 @@ class GenerationError(RuntimeError):
     pass
 
 
+# Uploads from the server sometimes stall mid-request (seen 2026-11-02, ~1 in 10 calls). With
+# no timeout the SDK waited ~16 min before failing the round, with the chat locked meanwhile.
+# Timeouts are per attempt, in seconds: refining takes ~5 s, a 2K image well under a minute.
+# We retry ourselves because the SDK wraps transport errors before its own retry sees them.
+TEXT_TIMEOUT = 60
+IMAGE_TIMEOUT = 180
+ATTEMPTS = 3
+
+
 def image_part(data: bytes, mime: str = "image/png") -> dict:
     return {"type": "image", "data": base64.b64encode(data).decode(), "mime_type": mime}
 
@@ -43,8 +53,19 @@ class Gemini:
         self.image_model = image_model
         self.text_model = text_model
 
+    async def _create(self, timeout: float, **kwargs):
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                return await self.client.aio.interactions.create(store=False, timeout=timeout, **kwargs)
+            except Exception as e:
+                # Network stalls and drops; API errors (4xx/5xx) are left to the SDK.
+                if attempt == ATTEMPTS or not isinstance(e.__cause__, httpx.TransportError):
+                    raise
+                log.warning("gemini %s, retrying (%d/%d)", type(e.__cause__).__name__, attempt, ATTEMPTS)
+
     async def structured[T: BaseModel](self, system: str, parts: list[dict], schema: type[T]) -> T:
-        interaction = await self.client.aio.interactions.create(
+        interaction = await self._create(
+            TEXT_TIMEOUT,
             model=self.text_model,
             system_instruction=system,
             input=parts,
@@ -53,7 +74,6 @@ class Gemini:
                 "mime_type": "application/json",
                 "schema": schema.model_json_schema(),
             },
-            store=False,
         )
         return schema.model_validate_json(interaction.output_text)
 
@@ -61,11 +81,11 @@ class Gemini:
         self, prompt: str, images: list[bytes], aspect_ratio: str, size: str, model: str | None = None
     ) -> bytes:
         parts = [text_part(prompt)] + [image_part(b) for b in images]
-        interaction = await self.client.aio.interactions.create(
+        interaction = await self._create(
+            IMAGE_TIMEOUT,
             model=model or self.image_model,
             input=parts,
             response_format={"type": "image", "aspect_ratio": aspect_ratio, "image_size": size},
-            store=False,
         )
         out = interaction.output_image
         if not out or not out.data:
