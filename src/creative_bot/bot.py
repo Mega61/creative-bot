@@ -142,8 +142,8 @@ class Bot:
             "4. Escribe qué cambiar → nueva ronda desde las fotos originales.\n"
             "   Responde a la foto A o B con el cambio → edito esa imagen exacta.\n"
             "5. ✅ en la que te guste → eliges logo en la esquina y si la escalo x2.\n\n"
-            "/upscale escalar x2 cualquier imagen: responde /upscale a la imagen, o envíala\n"
-            "   con /upscale como texto (mejor como archivo).\n"
+            "/upscale solo escalar x2: envía la imagen y luego /upscale, o envíala con\n"
+            "   /upscale como texto, o responde /upscale a una imagen (mejor como archivo).\n"
             "/prompt ver el prompt actual · /deshacer volver una ronda · /otra repetir\n"
             "/reiniciar otra idea con las mismas fotos · /cancelar descartar todo\n"
             "/modelo cambiar el modelo de imagen (aplica desde la siguiente ronda)\n"
@@ -279,6 +279,12 @@ class Bot:
         if target and (target.photo or _image_document(target)):
             await self.upscale_and_send(msg, await _download(target), compressed=bool(target.photo))
             return
+        if st.pending and st.pending.refs and not st.pending.brief:
+            # Photo(s) just sent without instructions: upscale those instead of starting a flow.
+            refs, st.pending = st.pending.refs, None
+            for data in refs:
+                await self.upscale_and_send(msg, data)
+            return
         st.awaiting_upscale = True
         await msg.reply_text("Envíame la imagen a escalar (mejor como archivo, no como foto).")
 
@@ -337,7 +343,10 @@ class Bot:
         if pending.brief:
             await self.ask_format(msg)
         else:
-            await msg.reply_text(f"Tengo {len(pending.refs)} foto(s). ¿Qué quieres crear con ellas?")
+            await msg.reply_text(
+                f"Tengo {len(pending.refs)} foto(s). ¿Qué quieres crear con ellas?\n"
+                "(O /upscale para solo escalarlas x2.)"
+            )
 
     async def on_text(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self.allowed(update) or not await self.require_brand(update):
